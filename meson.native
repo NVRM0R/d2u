@@ -1,0 +1,3 @@
+[binaries]
+c = gcc-13
+cpp = gxx-13
