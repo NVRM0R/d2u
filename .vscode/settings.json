@@ -91,7 +91,8 @@
         "typeinfo": "cpp",
         "valarray": "cpp",
         "variant": "cpp",
-        "format": "cpp"
+        "format": "cpp",
+        "hash_map": "cpp"
     },
     "C_Cpp.default.configurationProvider": "mesonbuild.mesonbuild"
 }
