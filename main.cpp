@@ -15,7 +15,7 @@
 const std::string demoServiceName = "inmys-uart.service";
 const std::string demoObjectPath = "/nms/bklt";
 const std::string demoInterfaceName = "nms.bklt";
-const std::string S5Pin = "PWR_S5";
+const std::string S3Pin = "PWR_S3";
 const char* BMC_PATH = "/dev/ttyACM0";
 
 class Application
@@ -30,7 +30,7 @@ class Application
             demoObjectPath, demoInterfaceName,
             [this](sdbusplus::asio::dbus_interface& demo) {
             demo.register_property_r<bool>(
-                S5Pin, sdbusplus::vtable::property_::emits_change,
+                S3Pin, sdbusplus::vtable::property_::emits_change,
                 [this](bool) { 
                     unsigned char reg = readRegister(BMC_PATH);
                     setState(reg & 1<<0);
@@ -56,7 +56,7 @@ class Application
     {
         sdbusplus::asio::getProperty<bool>(
             bus_, demoServiceName, demoObjectPath, demoInterfaceName,
-            S5Pin,
+            S3Pin,
             [this](boost::system::error_code ec, bool value) {
             if (ec)
             {
