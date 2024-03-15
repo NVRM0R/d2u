@@ -16,7 +16,7 @@ const std::string demoServiceName = "inmys-uart.service";
 const std::string demoObjectPath = "/nms/bklt";
 const std::string demoInterfaceName = "nms.bklt";
 const std::string S3Pin = "PWR_S3";
-const char* BMC_PATH = "/dev/ttyACM0";
+const char* BMC_PATH = "/dev/ttyACM1";
 
 class Application
 {
