@@ -16,6 +16,7 @@ const std::string demoServiceName = "inmys-uart.service";
 const std::string demoObjectPath = "/nms/bklt";
 const std::string demoInterfaceName = "nms.bklt";
 const std::string S3Pin = "PWR_S3";
+const std::string POKPin = "PWR_OK";
 const char* BMC_PATH = "/dev/ttyACM0";
 
 class Application
@@ -26,17 +27,35 @@ class Application
         ioc_(ioc),
         bus_(bus), objServer_(objServer)
     {
-        demo_ = objServer_.add_unique_interface(
+        i_S3 = objServer_.add_unique_interface(
             demoObjectPath, demoInterfaceName,
             [this](sdbusplus::asio::dbus_interface& demo) {
             demo.register_property_r<bool>(
                 S3Pin, sdbusplus::vtable::property_::emits_change,
                 [this](bool) { 
-                    unsigned char reg = readRegister(BMC_PATH);
-                    setState(reg & 1<<0);
+                    unsigned char reg = readRegister(BMC_PATH,0x01);
+                    _S3_value = reg & 1<<0;
                     return _S3_value; 
                     });
         });
+
+
+        i_POK = objServer_.add_unique_interface(
+            demoObjectPath, demoInterfaceName,
+            [this](sdbusplus::asio::dbus_interface& demo) {
+            demo.register_property_r<bool>(
+                POKPin, sdbusplus::vtable::property_::emits_change,
+                [this](bool) { 
+                    unsigned char reg = readRegister(BMC_PATH,0x03);
+                    bool psu1 = (reg & 1<<1)>0?true:false;
+                    bool psu2 = (reg & 1<<5)>0?true:false;
+ 
+                    _POK_value = psu1 || psu2;
+                    return _POK_value; 
+                    });
+        });
+
+
     }
 
     uint32_t fatalErrors() const
@@ -65,10 +84,18 @@ class Application
             }
             std::cout << "S3 value is: " << value << "\n";
         });
-    }
 
-    void setState(bool newState){
-        _S3_value = newState;
+        sdbusplus::asio::getProperty<bool>(
+            bus_, demoServiceName, demoObjectPath, demoInterfaceName,
+            POKPin,
+            [this](boost::system::error_code ec, bool value) {
+            if (ec)
+            {
+                getFailed();
+                return;
+            }
+            std::cout << "PowerOK value is: " << value << "\n";
+        });
     }
 
   private:
@@ -76,12 +103,13 @@ class Application
     boost::asio::io_context& ioc_;
     sdbusplus::asio::connection& bus_;
 
-    std::unique_ptr<sdbusplus::asio::dbus_interface> demo_;
+    std::unique_ptr<sdbusplus::asio::dbus_interface> i_S3,i_POK;
     bool _S3_value = false;
+    bool _POK_value = false;
 
     uint32_t fatalErrors_ = 0u;
 
-    int readRegister(const char* dev){
+    int readRegister(const char* dev,unsigned char reg){
         int fd = open(dev, O_RDWR);
 
         if (fd == -1) {
@@ -100,7 +128,7 @@ class Application
         tty.c_cc[VMIN] = 0;
         tcsetattr(fd, TCSANOW, &tty);
 
-        unsigned char txByte[] =   {'0','0','r','b','0','1','\r','\n'};
+        unsigned char txByte[] =   {'0','0','r','b',reg/10+'0',reg%10+'0','\r','\n'};
         unsigned char rxByte[10] = {0,0,0,0,0,0,0,0,0,0};
         int len;
         // Send byte
@@ -114,7 +142,7 @@ class Application
             return -1;
         }
         close(fd);
-        printf("Read: %s",rxByte);
+        printf("Read: %s \n",rxByte);
         unsigned char Hb = (rxByte[5] >= 'A') ? (rxByte[5] - 'A' + 10) : (rxByte[5] - '0');
         unsigned char Lb = (rxByte[6] >= 'A') ? (rxByte[6] - 'A' + 10) : (rxByte[6] - '0');
         unsigned char result = Hb*10+Lb;
@@ -139,12 +167,9 @@ int main(int, char**)
 
     Application app(ioc, *bus, *objServer);
 
+    std::cout << "Waiting clients"  << "\n";
 
-    std::cout << "Trying to change: \n";
-    
     boost::asio::post(ioc, [&app] { app.asyncReadProperties(); });
-
-    app.setState(true);
 
 
     ioc.run();
