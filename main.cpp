@@ -1,5 +1,6 @@
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/signal_set.hpp>
+#include <boost/asio.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
 #include <sdbusplus/asio/property.hpp>
@@ -7,6 +8,7 @@
 #include <chrono>
 #include <thread>
 #include <fcntl.h>
+#include <memory>
 #include <termios.h>
 #include <unistd.h>
 
@@ -21,20 +23,42 @@ const char* BMC_PATH = "/dev/ttyACM0";
 
 class Application
 {
+  private:
+    std::unique_ptr<boost::asio::steady_timer> updateTimer;
+    sdbusplus::asio::object_server& objServer_;
+    boost::asio::io_context& ioc_;
+    sdbusplus::asio::connection& bus_;
+
+    std::unique_ptr<sdbusplus::asio::dbus_interface> i_S3,i_POK;
+    bool _S3_value = false;
+    bool _POK_value = false;
+
+    void timerInit(){
+        updateTimer.reset(new boost::asio::steady_timer(ioc_,std::chrono::steady_clock::now() + std::chrono::seconds(1)));
+        updateTimer->async_wait(
+            [this] (const boost::system::error_code& error){
+            if(!error){
+                std::cout<<"Tick\n S3_VAL:"<<_S3_value<<"\nPOK_VA:"<<_POK_value<<"\n"; 
+                asyncUpdate();
+            }
+        });
+    }
+
   public:
+
     Application(boost::asio::io_context& ioc, sdbusplus::asio::connection& bus,
                 sdbusplus::asio::object_server& objServer) :
         ioc_(ioc),
         bus_(bus), objServer_(objServer)
     {
+        timerInit();
+
         i_S3 = objServer_.add_unique_interface(
             demoObjectPath, demoInterfaceName,
             [this](sdbusplus::asio::dbus_interface& demo) {
             demo.register_property_r<bool>(
                 S3Pin, sdbusplus::vtable::property_::emits_change,
                 [this](bool) { 
-                    unsigned char reg = readRegister(BMC_PATH,0x01);
-                    _S3_value = reg & 1<<0;
                     return _S3_value; 
                     });
         });
@@ -46,11 +70,6 @@ class Application
             demo.register_property_r<bool>(
                 POKPin, sdbusplus::vtable::property_::emits_change,
                 [this](bool) { 
-                    unsigned char reg = readRegister(BMC_PATH,0x03);
-                    bool psu1 = (reg & 1<<1)>0?true:false;
-                    bool psu2 = (reg & 1<<5)>0?true:false;
- 
-                    _POK_value = psu1 || psu2;
                     return _POK_value; 
                     });
         });
@@ -71,8 +90,27 @@ class Application
         };
     }
 
-    void asyncReadProperties()
+    void asyncUpdate()
     {
+        
+        unsigned char reg;
+        bool tmp;
+        reg = readRegister(BMC_PATH,0x01);
+        
+        tmp = (reg & 1<<0)>0?true:false;
+        if(tmp!=_S3_value){
+            i_S3->signal_property(S3Pin);
+            _S3_value = tmp;
+        }
+
+        tmp = (reg & 1<<1)>0?true:false;
+        if(tmp!=_POK_value){
+            i_POK->signal_property(POKPin);
+            _POK_value = tmp;
+        }
+        timerInit();
+    }
+    void asyncReadProperties(){
         sdbusplus::asio::getProperty<bool>(
             bus_, demoServiceName, demoObjectPath, demoInterfaceName,
             S3Pin,
@@ -96,17 +134,10 @@ class Application
             }
             std::cout << "PowerOK value is: " << value << "\n";
         });
+
     }
 
-  private:
-    sdbusplus::asio::object_server& objServer_;
-    boost::asio::io_context& ioc_;
-    sdbusplus::asio::connection& bus_;
-
-    std::unique_ptr<sdbusplus::asio::dbus_interface> i_S3,i_POK;
-    bool _S3_value = false;
-    bool _POK_value = false;
-
+private:
     uint32_t fatalErrors_ = 0u;
 
     int readRegister(const char* dev,unsigned char reg){
@@ -148,8 +179,6 @@ class Application
         unsigned char result = Hb*10+Lb;
         return result;
     }
-
-
 };
 
 int main(int, char**)
@@ -169,7 +198,6 @@ int main(int, char**)
 
     std::cout << "Waiting clients"  << "\n";
 
-    boost::asio::post(ioc, [&app] { app.asyncReadProperties(); });
 
 
     ioc.run();
